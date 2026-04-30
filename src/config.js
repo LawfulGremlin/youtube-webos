@@ -28,7 +28,9 @@ export const shortcutActions = {
   save_to_playlist: 'Save / Watch Later',
   oled_toggle: 'Toggle OLED Care Mode',
   sb_manual_skip: 'Manual Skip / Jump to Highlight',
-  config_menu: 'Open/Close Settings'
+  config_menu: 'Open/Close Settings',
+  frame_step_fwd: 'Frame Step Forward',
+  frame_step_back: 'Frame Step Backward'
 };
 
 

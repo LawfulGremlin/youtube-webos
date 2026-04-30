@@ -67,7 +67,9 @@ const ACTION_SCOPES = {
     toggle_description: 'VIDEO',
     save_to_playlist: 'VIDEO',
     sb_skip_prev: 'VIDEO',
-    sb_manual_skip: 'VIDEO'
+    sb_manual_skip: 'VIDEO',
+    frame_step_fwd: 'VIDEO',
+    frame_step_back: 'VIDEO'
 };
 
 function updateShortcutCache(key) {
@@ -748,6 +750,14 @@ function performBurstSeek(seconds, video) {
     }, 1200);
 }
 
+function performFrameStep(direction, video) {
+    if (!video) return;
+    if (!video.paused) video.pause();
+    const frameDuration = 1 / 30;
+    video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + direction * frameDuration));
+    showNotification(direction > 0 ? '►| +1 Frame' : '|◄ -1 Frame', 1000);
+}
+
 function triggerInternal(element, name) {
   if (!element) return false;
   let success = false;
@@ -1111,6 +1121,12 @@ function handleShortcutAction(action) {
           } else showNotification('SponsorBlock not loaded');
         } catch (e) { showNotification('Error: ' + e.message); }
         break;
+    case 'frame_step_fwd':
+        performFrameStep(1, video);
+        break;
+    case 'frame_step_back':
+        performFrameStep(-1, video);
+        break;
     default:
         console.warn(`[Shortcut] Unknown action: ${action}`);
   }
@@ -1165,7 +1181,8 @@ const eventHandler = (evt) => {
 
   // --- Proceed to Debounce and Execution ---
   
-  const isBurstAction = action === 'seek_15_fwd' || action === 'seek_15_back';
+  const isBurstAction = action === 'seek_15_fwd' || action === 'seek_15_back'
+                     || action === 'frame_step_fwd' || action === 'frame_step_back';
   const now = Date.now();
 
   if (!isBurstAction && now - lastShortcutTime < shortcutDebounceTime && lastShortcutKey === keyName) {
