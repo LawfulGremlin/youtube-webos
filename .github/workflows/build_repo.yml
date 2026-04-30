@@ -1,7 +1,8 @@
 name: Update Homebrew Repository
 on:
-  release:
-    types: [published]
+  workflow_run:
+    workflows: ["Build & Release"]
+    types: [completed]
   workflow_dispatch:
 permissions:
   contents: write
@@ -9,6 +10,7 @@ permissions:
   id-token: write
 jobs:
   update-repo:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
