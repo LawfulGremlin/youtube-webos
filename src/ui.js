@@ -69,7 +69,9 @@ const ACTION_SCOPES = {
     sb_skip_prev: 'VIDEO',
     sb_manual_skip: 'VIDEO',
     frame_step_fwd: 'VIDEO',
-    frame_step_back: 'VIDEO'
+    frame_step_back: 'VIDEO',
+    frame_skip_fwd: 'VIDEO',
+    frame_skip_back: 'VIDEO'
 };
 
 function updateShortcutCache(key) {
@@ -750,12 +752,13 @@ function performBurstSeek(seconds, video) {
     }, 1200);
 }
 
-function performFrameStep(direction, video) {
+function performFrameStep(frames, video) {
     if (!video) return;
     if (!video.paused) video.pause();
     const frameDuration = 1 / 30;
-    video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + direction * frameDuration));
-    showNotification(direction > 0 ? '►| +1 Frame' : '|◄ -1 Frame', 1000);
+    video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + frames * frameDuration));
+    const abs = Math.abs(frames);
+    showNotification(frames > 0 ? ('►| +' + abs + ' Frame' + (abs !== 1 ? 's' : '')) : ('|◄ -' + abs + ' Frame' + (abs !== 1 ? 's' : '')), 1000);
 }
 
 function triggerInternal(element, name) {
@@ -1127,6 +1130,12 @@ function handleShortcutAction(action) {
     case 'frame_step_back':
         performFrameStep(-1, video);
         break;
+    case 'frame_skip_fwd':
+        performFrameStep(15, video);
+        break;
+    case 'frame_skip_back':
+        performFrameStep(-15, video);
+        break;
     default:
         console.warn(`[Shortcut] Unknown action: ${action}`);
   }
@@ -1182,7 +1191,8 @@ const eventHandler = (evt) => {
   // --- Proceed to Debounce and Execution ---
   
   const isBurstAction = action === 'seek_15_fwd' || action === 'seek_15_back'
-                     || action === 'frame_step_fwd' || action === 'frame_step_back';
+                     || action === 'frame_step_fwd' || action === 'frame_step_back'
+                     || action === 'frame_skip_fwd' || action === 'frame_skip_back';
   const now = Date.now();
 
   if (!isBurstAction && now - lastShortcutTime < shortcutDebounceTime && lastShortcutKey === keyName) {
