@@ -20,9 +20,9 @@
         "iconUri": "https://raw.githubusercontent.com/LawfulGremlin/youtube-webos/main/assets/icon.png",
         "sourceUrl": "https://github.com/LawfulGremlin/youtube-webos",
         "rootRequired": false,
-        "ipkUrl": "https://github.com/LawfulGremlin/youtube-webos/releases/download/0.7.11/youtube.leanback.v4_0.7.6_all.ipk",
+        "ipkUrl": "https://github.com/LawfulGremlin/youtube-webos/releases/download/0.7.12/youtube.leanback.v4_0.7.6_all.ipk",
         "ipkHash": {
-          "sha256": "a058b5e6e1caa6309f990b43fb6dc96084422df50f699303da937d8c8c89f43d"
+          "sha256": "f798afd5938dd4b514301898393c4791b5b26a991c7466c7c6c1be6191fd5510"
         }
       }
     }
