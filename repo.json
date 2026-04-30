@@ -1,48 +1,28 @@
 {
   "paging": {
     "page": 1,
-    "count": 2,
+    "count": 1,
     "maxPage": 1,
-    "itemsTotal": 2
+    "itemsTotal": 1
   },
   "packages": [
     {
       "id": "youtube.leanback.v4",
       "title": "YouTube AdFree",
       "description": "YouTube AdFree",
-      "iconUri": "https://raw.githubusercontent.com/NicholasBly/youtube-webos/main/assets/icon.png",
+      "iconUri": "https://raw.githubusercontent.com/LawfulGremlin/youtube-webos/main/assets/icon.png",
       "manifest": {
         "id": "youtube.leanback.v4",
         "version": "0.7.6",
         "type": "web",
         "title": "YouTube AdFree",
         "appDescription": "YouTube AdFree",
-        "iconUri": "https://raw.githubusercontent.com/NicholasBly/youtube-webos/main/assets/icon.png",
-        "sourceUrl": "https://github.com/NicholasBly/youtube-webos",
+        "iconUri": "https://raw.githubusercontent.com/LawfulGremlin/youtube-webos/main/assets/icon.png",
+        "sourceUrl": "https://github.com/LawfulGremlin/youtube-webos",
         "rootRequired": false,
-        "ipkUrl": "https://github.com/NicholasBly/youtube-webos/releases/download/0.7.6/youtube.leanback.v4_0.7.6_all.ipk",
+        "ipkUrl": "https://github.com/LawfulGremlin/youtube-webos/releases/download/0.7.9/youtube.leanback.v4_0.7.6_all.ipk",
         "ipkHash": {
-          "sha256": "3aa2fb10d8b1bb21ad3dd8c146fcd0b061a791653aad7d9fc22d14eb5877a9aa"
-        }
-      }
-    },
-    {
-      "id": "youtube.leanback.v4.webos22",
-      "title": "YouTube AdFree (webOS 22+)",
-      "description": "YouTube AdFree for webOS 22 and newer. Lighter optimized build supporting newer hardware.",
-      "iconUri": "https://raw.githubusercontent.com/NicholasBly/youtube-webos/main/assets/icon.png",
-      "manifest": {
-        "id": "youtube.leanback.v4.webos22",
-        "version": "0.7.6",
-        "type": "web",
-        "title": "YouTube AdFree (webOS 22+)",
-        "appDescription": "YouTube AdFree for webOS 22 and newer. Lighter optimized build supporting newer hardware.",
-        "iconUri": "https://raw.githubusercontent.com/NicholasBly/youtube-webos/main/assets/icon.png",
-        "sourceUrl": "https://github.com/NicholasBly/youtube-webos",
-        "rootRequired": false,
-        "ipkUrl": "https://github.com/NicholasBly/youtube-webos/releases/download/0.7.6/youtube.leanback.v4_0.7.6_all_webOS22%2B.ipk",
-        "ipkHash": {
-          "sha256": "40e408f33314e70ebeff19aadfa33d4de9b68cbcecdc9cd25163c878636e6edb"
+          "sha256": "e2da0e611b1a253607190cda703d6e953bd5dc65686df1248fdb87c44c503678"
         }
       }
     }
