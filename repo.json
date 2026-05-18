@@ -13,7 +13,7 @@
       "iconUri": "https://raw.githubusercontent.com/LawfulGremlin/youtube-webos/main/assets/icon.png",
       "manifest": {
         "id": "youtube.leanback.v4",
-        "version": "0.7.6",
+        "version": "0.7.9",
         "type": "web",
         "title": "YouTube AdFree",
         "appDescription": "YouTube AdFree",
