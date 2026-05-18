@@ -1,0 +1,69 @@
+name: Bump LG Counter
+
+# One-click fork-only release. Run from the Actions tab when you've
+# made changes on top of the current upstream baseline and want to
+# ship them. Increments the patch of the current fork version
+# (e.g. 7.9.0 -> 7.9.1, which encodes "LG01" against upstream 0.7.9),
+# commits, tags, and kicks off release.yml.
+#
+# Refuses to run if the current version is still in upstream form
+# (0.X.Y) — that means auto-tag-on-sync hasn't yet baselined the
+# scheme; let it run first.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Validate current version
+        id: validate
+        run: |
+          set -e
+          CURR=$(node -p "require('./package.json').version")
+          echo "Current version: $CURR"
+          if [[ "$CURR" =~ ^0\. ]]; then
+            echo "::error::Current version $CURR is in upstream form (0.X.Y). Auto-tag-on-sync should run first to establish the fork scheme."
+            exit 1
+          fi
+          if ! [[ "$CURR" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Current version $CURR is not plain X.Y.Z semver. Refusing to auto-bump."
+            exit 1
+          fi
+          echo "current=$CURR" >> "$GITHUB_OUTPUT"
+
+      - name: Configure git
+        run: |
+          git config user.name  'GitHub Actions'
+          git config user.email 'actions@github.com'
+
+      - name: Bump patch, commit, tag
+        id: bump
+        run: |
+          NEW=$(npm version --tag-version-prefix='' patch -m "Bump LG counter to %s")
+          # npm version prints the new version (with prefix if any). We
+          # used an empty prefix, so $NEW is exactly the new version.
+          echo "new=$NEW" >> "$GITHUB_OUTPUT"
+
+      - name: Push commit and tag
+        run: git push --follow-tags origin main
+
+      - name: Trigger release build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run release.yml --ref "${{ steps.bump.outputs.new }}"

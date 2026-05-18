@@ -1,3 +1,5 @@
+import { getRegisteredActions } from './fork-extensions/shortcut-registry';
+
 const CONFIG_KEY = 'ytaf-configuration';
 
 export const segmentTypes = {
@@ -29,10 +31,7 @@ export const shortcutActions = {
   oled_toggle: 'Toggle OLED Care Mode',
   sb_manual_skip: 'Manual Skip / Jump to Highlight',
   config_menu: 'Open/Close Settings',
-  frame_step_fwd: 'Frame Step Forward',
-  frame_step_back: 'Frame Step Backward',
-  frame_skip_fwd: 'Skip 15 Frames Forward',
-  frame_skip_back: 'Skip 15 Frames Backward'
+  ...getRegisteredActions()
 };
 
 
@@ -64,6 +63,7 @@ const configOptions = new Map([
   ['upgradeThumbnails', { default: false, desc: 'Max Thumbnail Quality' }],
   ['removeGlobalShorts', { default: false, desc: 'Remove Shorts (Global)' }],
   ['removeTopLiveGames', { default: false, desc: 'Remove Top Live Games' }],
+  ['removeMostRelevant', { default: false, desc: 'Remove "Most Relevant" Shelf' }],
   ['enableSponsorBlock', { default: true, desc: 'SponsorBlock' }],
   ['enableMutedSegments', { default: false, desc: 'Allow segments that mute audio' }],
   ['skipSegmentsOnce', { default: false, desc: 'Skip Segments Once' }],
@@ -84,6 +84,7 @@ const configOptions = new Map([
   ['enableOledCareMode', { default: false, desc: 'OLED-Care Mode (True Black UI)' }],
   ['videoShelfOpacity', { default: 100, desc: 'Video shelf opacity' }],
   ['fixMultilineTitles', { default: true, desc: 'Fix Multiline Titles' }],
+  ['removeBlackBorders', { default: false, desc: 'New Liquid Glass UI' }],
   ['forcePreviews', { default: 'disabled', desc: 'Force Previews' }],
   ['enableLegacyEmojiFix', { default: true, desc: 'Emoji + Characters Fix' }],
   ['hideGuestSignInPrompts', { default: false, desc: 'Guest Mode: Hide Sign-in Buttons' }],

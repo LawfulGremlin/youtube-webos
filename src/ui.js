@@ -10,6 +10,16 @@ import sponsorBlockUI from './Sponsorblock-UI.js';
 import { sendKey, REMOTE_KEYS, isGuestMode, isWatchPage, isShortsPage, isSearchPage, SELECTORS } from './utils.js';
 import { initAdblock, destroyAdblock, initTrackingBlock, destroyTrackingBlock } from './adblock.js';
 import { getWebOSVersion } from './webos-utils.js';
+import {
+  getRegisteredScopes,
+  getRegisteredHandler,
+  isRegisteredBurstAction,
+  setContext as setShortcutRegistryContext
+} from './fork-extensions/shortcut-registry';
+
+// Expose ui-side utilities to fork extensions without creating a
+// circular import (frame-step.js cannot import this file directly).
+setShortcutRegistryContext({ showNotification });
 
 let lastSafeFocus = null;
 let oledKeepAliveTimer = null;
@@ -68,10 +78,7 @@ const ACTION_SCOPES = {
     save_to_playlist: 'VIDEO',
     sb_skip_prev: 'VIDEO',
     sb_manual_skip: 'VIDEO',
-    frame_step_fwd: 'VIDEO',
-    frame_step_back: 'VIDEO',
-    frame_skip_fwd: 'VIDEO',
-    frame_skip_back: 'VIDEO'
+    ...getRegisteredScopes()
 };
 
 function updateShortcutCache(key) {
@@ -462,11 +469,12 @@ function createOptionsPanel() {
   const elAdBlock = createConfigCheckbox('enableAdBlock');
   const elTrackingBlock = createConfigCheckbox('enableTrackingBlock');
   const cosmeticGroup = [elAdBlock, elTrackingBlock];
-  let elRemoveGlobalShorts = null, elRemoveTopLiveGames = null, elGuestPrompts = null;
+  let elRemoveGlobalShorts = null, elRemoveTopLiveGames = null, elRemoveMostRelevant = null, elGuestPrompts = null;
   
   elRemoveGlobalShorts = createConfigCheckbox('removeGlobalShorts');
   elRemoveTopLiveGames = createConfigCheckbox('removeTopLiveGames');
-  cosmeticGroup.push(elRemoveGlobalShorts, elRemoveTopLiveGames);
+  elRemoveMostRelevant = createConfigCheckbox('removeMostRelevant');
+  cosmeticGroup.push(elRemoveGlobalShorts, elRemoveTopLiveGames, elRemoveMostRelevant);
   if (isGuestMode()) { elGuestPrompts = createConfigCheckbox('hideGuestSignInPrompts'); cosmeticGroup.push(elGuestPrompts); }
 
   pageMain.appendChild(createSection('Cosmetic Filtering', cosmeticGroup));
@@ -475,8 +483,8 @@ function createOptionsPanel() {
   const setState = (el, enabled) => { if (!el) return; const input = el.querySelector('input'); if (input) { input.disabled = !enabled; el.style.opacity = enabled ? '1' : '0.5'; }};
   const updateDependencyState = () => {
     const isAdBlockOn = configRead('enableAdBlock');
-    if (!isAdBlockOn) { [elRemoveGlobalShorts, elRemoveTopLiveGames, elGuestPrompts].forEach(el => { setState(el, false); }); return; }
-	[elRemoveGlobalShorts, elRemoveTopLiveGames, elGuestPrompts].forEach(el => { setState(el, true); });
+    if (!isAdBlockOn) { [elRemoveGlobalShorts, elRemoveTopLiveGames, elRemoveMostRelevant, elGuestPrompts].forEach(el => { setState(el, false); }); return; }
+	[elRemoveGlobalShorts, elRemoveTopLiveGames, elRemoveMostRelevant, elGuestPrompts].forEach(el => { setState(el, true); });
   };
   
   elAdBlock.querySelector('input').addEventListener('change', updateDependencyState);
@@ -518,7 +526,8 @@ function createOptionsPanel() {
       createElement('div', { text: 'Adjusts opacity of black background underneath videos (Requires OLED-care mode)', style: { color: '#aaa', fontSize: '18px', padding: '4px 12px 12px' } }),
 	  createPreviewControl('forcePreviews'),
 	  createElement('div', { text: 'Forces the video thumbnail preview on/off on app load', style: { color: '#aaa', fontSize: '18px', padding: '4px 12px 12px' } }),
-	  createConfigCheckbox('fixMultilineTitles')
+	  createConfigCheckbox('fixMultilineTitles'),
+	  createConfigCheckbox('removeBlackBorders')
   ];
 
   if (getWebOSVersion() <= 4) {
@@ -750,15 +759,6 @@ function performBurstSeek(seconds, video) {
         activeSeekNotification = null;
         seekResetTimer = null;
     }, 1200);
-}
-
-function performFrameStep(frames, video) {
-    if (!video) return;
-    if (!video.paused) video.pause();
-    const frameDuration = 1 / 30;
-    video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + frames * frameDuration));
-    const abs = Math.abs(frames);
-    showNotification(frames > 0 ? ('►| +' + abs + ' Frame' + (abs !== 1 ? 's' : '')) : ('|◄ -' + abs + ' Frame' + (abs !== 1 ? 's' : '')), 1000);
 }
 
 function triggerInternal(element, name) {
@@ -1124,20 +1124,11 @@ function handleShortcutAction(action) {
           } else showNotification('SponsorBlock not loaded');
         } catch (e) { showNotification('Error: ' + e.message); }
         break;
-    case 'frame_step_fwd':
-        performFrameStep(1, video);
-        break;
-    case 'frame_step_back':
-        performFrameStep(-1, video);
-        break;
-    case 'frame_skip_fwd':
-        performFrameStep(15, video);
-        break;
-    case 'frame_skip_back':
-        performFrameStep(-15, video);
-        break;
-    default:
-        console.warn(`[Shortcut] Unknown action: ${action}`);
+    default: {
+        const registeredHandler = getRegisteredHandler(action);
+        if (registeredHandler) registeredHandler();
+        else console.warn(`[Shortcut] Unknown action: ${action}`);
+    }
   }
 }
 
@@ -1190,9 +1181,9 @@ const eventHandler = (evt) => {
 
   // --- Proceed to Debounce and Execution ---
   
-  const isBurstAction = action === 'seek_15_fwd' || action === 'seek_15_back'
-                     || action === 'frame_step_fwd' || action === 'frame_step_back'
-                     || action === 'frame_skip_fwd' || action === 'frame_skip_back';
+  const isBurstAction = action === 'seek_15_fwd'
+                     || action === 'seek_15_back'
+                     || isRegisteredBurstAction(action);
   const now = Date.now();
 
   if (!isBurstAction && now - lastShortcutTime < shortcutDebounceTime && lastShortcutKey === keyName) {
@@ -1285,27 +1276,88 @@ function initGlobalStyles() {
     const style = createElement('style');
     document.head.appendChild(style);
     
-    // Configurable styles updater
     const updateStyles = () => {
         const hideLogo = configRead('hideLogo');
         const fixTitles = configRead('fixMultilineTitles');
+        const removeBorders = configRead('removeBlackBorders');
         
         style.textContent = `
             /* Hide Logo */
-            ytlr-redux-connect-ytlr-logo-entity { visibility: ${hideLogo ? 'hidden' : 'visible'}; }
+            ytlr-redux-connect-ytlr-logo-entity, ytlr-logo-entity { visibility: ${hideLogo ? 'hidden' : 'visible'} !important; }
             
             /* UI Controls Hiding Class */
-            body.ytaf-hide-controls .GLc3cc { opacity: 0 !important; }
-            body.ytaf-hide-controls .webOs-watch { opacity: 0 !important; }
+            body.ytaf-hide-controls .GLc3cc,
+            body.ytaf-hide-controls .webOs-watch,
+            body.ytaf-hide-controls .ytLrWatchDefaultShadow,
+            body.ytaf-hide-controls [idomkey='shadow'],
+            body.ytaf-hide-controls .ytLrWatchDefault2025Shadow { 
+                opacity: 0 !important; 
+            }
 			
-			/* Fix Multiline Titles */
+            /* Fix Multiline Titles */
             ${fixTitles ? '.app-quality-root .SK1srf .WVWtef, .app-quality-root .SK1srf .niS3yd { padding-bottom: 0.37vh !important; padding-top: 0.37vh !important; }' : ''}
+            
+            /* Remove Black Borders */
+            ${removeBorders ? `
+            yt-formatted-string, 
+            .style-scope.ytd-rich-grid-media, 
+            #video-title,
+            #metadata-line,
+            .ytd-video-meta-block {
+                background-color: transparent !important;
+                background: none !important;
+                box-shadow: none !important;
+            }
+            #details.ytd-rich-grid-media {
+                background-color: transparent !important;
+                margin-top: 4px !important;
+            }
+            ytd-thumbnail {
+                background-color: transparent !important;
+            }
+            .ytd-searchbox, .ytp-videowall-still-info-bg {
+                background-color: transparent !important;
+            }
+            /* WebOS App Specific Background Overrides */
+            .app-quality-root .boSXqb .QFqCxd:before,
+            .app-quality-root .V7jTHe, 
+            .app-quality-root .g6XRz,
+            .app-quality-root .UGcxnc .sjENQb {
+                background-color: transparent !important;
+            }
+            /* Liquid Glass Player UI Overrides */
+            .ltewod.BZ345e {
+                background-color: #f1f1f1 !important;
+            }
+            .MIiKQd.CgA6bd, .clJQEe, .dySudf, .ltewod {
+                background-color: rgba(45, 45, 45, 0.45) !important;
+                background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0) 100%) !important;
+                box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3) !important;
+            }` : ''}
+
+            /* * Video player shadows
+             */
+            body .ytLrWatchDefaultShadow,
+            body [idomkey='shadow'] {
+                display: block !important;
+                height: 100% !important;
+                width: 100% !important;
+                pointer-events: none !important;
+                position: absolute !important;
+                background-image: linear-gradient(to bottom, rgba(0, 0, 0, 0) 0, rgba(0, 0, 0, 0.8) 90%) !important;
+                background-color: rgba(0, 0, 0, 0.3) !important;
+            }
+
+            body .ytLrWatchDefault2025Shadow {
+                background-color: rgba(11, 11, 11, 0.5) !important;
+            }
         `;
     };
 
     updateStyles();
     configAddChangeListener('hideLogo', updateStyles);
-	configAddChangeListener('fixMultilineTitles', updateStyles);
+    configAddChangeListener('fixMultilineTitles', updateStyles);
+    configAddChangeListener('removeBlackBorders', updateStyles);
 }
 
 function updateLogoState() {
@@ -1335,6 +1387,7 @@ function applyOledMode(enabled) {
   }
   
   if (enabled) {
+	document.body.classList.add('oled-theme-active');
     if(notificationContainer) notificationContainer.classList.add(oledClass);
     
     const opacityVal = configRead('videoShelfOpacity');
@@ -1361,10 +1414,14 @@ function applyOledMode(enabled) {
         .Jx9xPc { background-color: rgba(0, 0, 0, ${opacity}) !important; } 
         .p0DeOc { background-color: #000 !important; background-image: none !important; }
         ytlr-player-focus-ring { border: 0.375rem solid rgb(200, 200, 200) !important; }
+		ytlr-surface-page { background-image: none !important; background-color: #000 !important; }
         ${transparentBgRules}` 
     });
     document.head.appendChild(style);
-  } else if(notificationContainer) notificationContainer.classList.remove(oledClass);
+  } else {
+	  document.body.classList.remove('oled-theme-active');
+	  if(notificationContainer) notificationContainer.classList.remove(oledClass);
+  }
   updateLogoState();
 }
 

@@ -1,4 +1,4 @@
-* text=auto
+* text=auto eol=lf
 
 *.css text
 *.html text
@@ -21,3 +21,12 @@ LICENSE text
 
 *.jpg binary
 *.png binary
+
+# Fork-owned files: always keep our version when merging upstream.
+# Requires `git config merge.ours.driver true` on the runner (see
+# .github/workflows/sync-upstream.yml).
+README.md merge=ours
+repo.json merge=ours
+.github/workflows/sync-upstream.yml merge=ours
+.github/workflows/auto-tag-on-sync.yml merge=ours
+.github/workflows/bump-lg.yml merge=ours
