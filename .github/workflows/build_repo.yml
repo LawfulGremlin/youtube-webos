@@ -3,6 +3,8 @@ on:
   workflow_run:
     workflows: ["Build & Release"]
     types: [completed]
+  release:
+    types: [published]
   workflow_dispatch:
 permissions:
   contents: write

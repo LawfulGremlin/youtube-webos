@@ -1,0 +1,92 @@
+name: Auto-tag on Upstream Sync
+
+# Runs after every push to main. If the package.json version just
+# changed and looks like upstream's plain semver (0.X.Y), this transforms
+# it to the fork's scheme (X.Y.0) — bumping the upstream minor into
+# major and reserving the trailing digit for fork-only LG releases.
+# Then commits, tags, and fires release.yml via workflow_dispatch.
+#
+# Safety: bails if the previous commit had the same version (no upstream
+# sync happened) or the current version doesn't look like upstream's
+# scheme (we're already in fork format, or something unexpected).
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  maybe-tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Decide whether to bump
+        id: decide
+        run: |
+          set -e
+          CURR=$(node -p "require('./package.json').version")
+          if git rev-parse HEAD~1 >/dev/null 2>&1; then
+            PREV=$(git show HEAD~1:package.json | node -e "let s=''; process.stdin.on('data', c=>s+=c); process.stdin.on('end', ()=>console.log(JSON.parse(s).version))")
+          else
+            PREV=""
+          fi
+          echo "Previous version: $PREV"
+          echo "Current version:  $CURR"
+
+          if [ "$PREV" = "$CURR" ]; then
+            echo "Version unchanged — no upstream sync detected."
+            echo "skip=unchanged" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "$CURR" =~ ^0\.([0-9]+)\.([0-9]+)$ ]]; then
+            NEW="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.0"
+            echo "Transforming upstream $CURR -> fork $NEW"
+            echo "new=$NEW" >> "$GITHUB_OUTPUT"
+            echo "skip=no" >> "$GITHUB_OUTPUT"
+          else
+            echo "Current version $CURR is not upstream form 0.X.Y — already fork-format or unexpected. Skipping."
+            echo "skip=not-upstream-form" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Configure git
+        if: steps.decide.outputs.skip == 'no'
+        run: |
+          git config user.name  'GitHub Actions'
+          git config user.email 'actions@github.com'
+
+      - name: Bump version, commit, tag
+        if: steps.decide.outputs.skip == 'no'
+        run: |
+          # tag-version-prefix='' keeps tags as bare semver (7.9.0)
+          # rather than v7.9.0, matching the fork's existing tag style.
+          # npm version triggers the `version` lifecycle script
+          # (tools/sync-version.cjs), which propagates the new version
+          # into assets/appinfo.json and git-adds it before commit.
+          npm version --tag-version-prefix='' \
+            "${{ steps.decide.outputs.new }}" -m "Bump to %s"
+
+      - name: Push commit and tag
+        if: steps.decide.outputs.skip == 'no'
+        run: git push --follow-tags origin main
+
+      - name: Trigger release build
+        if: steps.decide.outputs.skip == 'no'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # workflow_dispatch is the only event triggerable by
+          # GITHUB_TOKEN, so we use it to kick off release.yml rather
+          # than relying on the tag-push trigger (which wouldn't fire).
+          gh workflow run release.yml --ref "${{ steps.decide.outputs.new }}"
