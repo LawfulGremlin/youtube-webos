@@ -26,7 +26,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: lts/*
           cache: npm
@@ -89,4 +89,4 @@ jobs:
           # workflow_dispatch is the only event triggerable by
           # GITHUB_TOKEN, so we use it to kick off release.yml rather
           # than relying on the tag-push trigger (which wouldn't fire).
-          gh workflow run release.yml --ref "${{ steps.decide.outputs.new }}"
+          gh workflow run release.yml --ref "refs/tags/${{ steps.decide.outputs.new }}"

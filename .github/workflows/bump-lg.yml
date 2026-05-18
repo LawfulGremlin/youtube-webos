@@ -26,7 +26,7 @@ jobs:
           ref: main
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: lts/*
           cache: npm
@@ -55,9 +55,8 @@ jobs:
       - name: Bump patch, commit, tag
         id: bump
         run: |
-          NEW=$(npm version --tag-version-prefix='' patch -m "Bump LG counter to %s")
-          # npm version prints the new version (with prefix if any). We
-          # used an empty prefix, so $NEW is exactly the new version.
+          npm version --tag-version-prefix='' patch -m "Bump LG counter to %s"
+          NEW=$(node -p "require('./package.json').version")
           echo "new=$NEW" >> "$GITHUB_OUTPUT"
 
       - name: Push commit and tag
@@ -66,4 +65,4 @@ jobs:
       - name: Trigger release build
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh workflow run release.yml --ref "${{ steps.bump.outputs.new }}"
+        run: gh workflow run release.yml --ref "refs/tags/${{ steps.bump.outputs.new }}"

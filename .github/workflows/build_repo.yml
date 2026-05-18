@@ -3,22 +3,18 @@ on:
   workflow_run:
     workflows: ["Build & Release"]
     types: [completed]
-  release:
-    types: [published]
   workflow_dispatch:
 permissions:
   contents: write
-  pages: write
-  id-token: write
 jobs:
   update-repo:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.x'
       - name: Generate repo.json
@@ -33,7 +29,7 @@ jobs:
           import hashlib
           
           # --- CONFIGURATION ---
-          APP_INFO_PATH = 'assets/appinfo.json' 
+          APP_INFO_PATH = 'assets/appinfo.json'
           ICON_PATH_IN_REPO = 'assets/icon.png'
           # ---------------------
           
@@ -62,22 +58,16 @@ jobs:
               sys.exit(1)
           
           standard_asset = None
-          modern_asset = None
-
           for asset in release_data['assets']:
               if asset['name'].endswith('.ipk'):
-                  if 'webOS22+' in asset['name']:
-                      modern_asset = asset
-                  else:
-                      standard_asset = asset
+                  standard_asset = asset
+                  break
           
-          if not standard_asset and not modern_asset:
-              print("No .ipk files found in the latest release")
+          if not standard_asset:
+              print("No .ipk file found in the latest release")
               sys.exit(1)
-              
-          packages = []
           
-          def create_package(asset, is_modern=False):
+          def create_package(asset):
               ipk_url = asset['browser_download_url']
               print(f"Downloading IPK from {ipk_url}")
               
@@ -92,16 +82,9 @@ jobs:
               
               print(f"SHA256: {sha256_hash}")
               
-              # Default values
               pkg_id = app_info.get('id')
               title = app_info.get('title')
               description = app_info.get('description', title)
-              
-              # Overrides for modern build
-              if is_modern:
-                  pkg_id = f"{pkg_id}.webos22"
-                  title = f"{title} (webOS 22+)"
-                  description = "YouTube AdFree for webOS 22 and newer. Lighter optimized build supporting newer hardware."
               
               manifest = {
                   "id": pkg_id,
@@ -125,16 +108,11 @@ jobs:
                   "iconUri": f"https://raw.githubusercontent.com/{repo_name}/main/{ICON_PATH_IN_REPO}",
                   "manifest": manifest
               }
-
-          if standard_asset:
-              print("Processing Standard Asset...")
-              pkg = create_package(standard_asset)
-              if pkg: packages.append(pkg)
-              
-          if modern_asset:
-              print("Processing Modern (webOS 22+) Asset...")
-              pkg = create_package(modern_asset, is_modern=True)
-              if pkg: packages.append(pkg)
+          
+          packages = []
+          pkg = create_package(standard_asset)
+          if pkg:
+              packages.append(pkg)
           
           repo_data = {
               "paging": {
@@ -157,14 +135,11 @@ jobs:
           git config --global user.name 'GitHub Actions'
           git config --global user.email 'actions@github.com'
           
-          # Checkout the main branch explicitly
           git fetch origin main
           git checkout main
           
-          # Add and commit changes
           git add repo.json
           
-          # Only commit if there are changes
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
