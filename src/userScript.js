@@ -1,3 +1,9 @@
+// Fork extensions register shortcut actions in shortcut-registry.
+// This must be imported before any module that reads from the registry
+// (config.js, ui.js) so the registrations are visible at their
+// evaluation time.
+import './fork-extensions';
+
 import 'whatwg-fetch';
 import './domrect-polyfill';
 import './adblock.js';

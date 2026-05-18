@@ -1,3 +1,5 @@
+import { getRegisteredActions } from './fork-extensions/shortcut-registry';
+
 const CONFIG_KEY = 'ytaf-configuration';
 
 export const segmentTypes = {
@@ -29,10 +31,7 @@ export const shortcutActions = {
   oled_toggle: 'Toggle OLED Care Mode',
   sb_manual_skip: 'Manual Skip / Jump to Highlight',
   config_menu: 'Open/Close Settings',
-  frame_step_fwd: 'Frame Step Forward',
-  frame_step_back: 'Frame Step Backward',
-  frame_skip_fwd: 'Skip 15 Frames Forward',
-  frame_skip_back: 'Skip 15 Frames Backward'
+  ...getRegisteredActions()
 };
 
 

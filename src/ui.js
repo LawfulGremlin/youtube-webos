@@ -10,6 +10,16 @@ import sponsorBlockUI from './Sponsorblock-UI.js';
 import { sendKey, REMOTE_KEYS, isGuestMode, isWatchPage, isShortsPage, isSearchPage, SELECTORS } from './utils.js';
 import { initAdblock, destroyAdblock, initTrackingBlock, destroyTrackingBlock } from './adblock.js';
 import { getWebOSVersion } from './webos-utils.js';
+import {
+  getRegisteredScopes,
+  getRegisteredHandler,
+  isRegisteredBurstAction,
+  setContext as setShortcutRegistryContext
+} from './fork-extensions/shortcut-registry';
+
+// Expose ui-side utilities to fork extensions without creating a
+// circular import (frame-step.js cannot import this file directly).
+setShortcutRegistryContext({ showNotification });
 
 let lastSafeFocus = null;
 let oledKeepAliveTimer = null;
@@ -68,10 +78,7 @@ const ACTION_SCOPES = {
     save_to_playlist: 'VIDEO',
     sb_skip_prev: 'VIDEO',
     sb_manual_skip: 'VIDEO',
-    frame_step_fwd: 'VIDEO',
-    frame_step_back: 'VIDEO',
-    frame_skip_fwd: 'VIDEO',
-    frame_skip_back: 'VIDEO'
+    ...getRegisteredScopes()
 };
 
 function updateShortcutCache(key) {
@@ -754,15 +761,6 @@ function performBurstSeek(seconds, video) {
     }, 1200);
 }
 
-function performFrameStep(frames, video) {
-    if (!video) return;
-    if (!video.paused) video.pause();
-    const frameDuration = 1 / 30;
-    video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + frames * frameDuration));
-    const abs = Math.abs(frames);
-    showNotification(frames > 0 ? ('►| +' + abs + ' Frame' + (abs !== 1 ? 's' : '')) : ('|◄ -' + abs + ' Frame' + (abs !== 1 ? 's' : '')), 1000);
-}
-
 function triggerInternal(element, name) {
   if (!element) return false;
   let success = false;
@@ -1126,20 +1124,11 @@ function handleShortcutAction(action) {
           } else showNotification('SponsorBlock not loaded');
         } catch (e) { showNotification('Error: ' + e.message); }
         break;
-    case 'frame_step_fwd':
-        performFrameStep(1, video);
-        break;
-    case 'frame_step_back':
-        performFrameStep(-1, video);
-        break;
-    case 'frame_skip_fwd':
-        performFrameStep(15, video);
-        break;
-    case 'frame_skip_back':
-        performFrameStep(-15, video);
-        break;
-    default:
-        console.warn(`[Shortcut] Unknown action: ${action}`);
+    default: {
+        const registeredHandler = getRegisteredHandler(action);
+        if (registeredHandler) registeredHandler();
+        else console.warn(`[Shortcut] Unknown action: ${action}`);
+    }
   }
 }
 
@@ -1192,9 +1181,9 @@ const eventHandler = (evt) => {
 
   // --- Proceed to Debounce and Execution ---
   
-  const isBurstAction = action === 'seek_15_fwd' || action === 'seek_15_back'
-                     || action === 'frame_step_fwd' || action === 'frame_step_back'
-                     || action === 'frame_skip_fwd' || action === 'frame_skip_back';
+  const isBurstAction = action === 'seek_15_fwd'
+                     || action === 'seek_15_back'
+                     || isRegisteredBurstAction(action);
   const now = Date.now();
 
   if (!isBurstAction && now - lastShortcutTime < shortcutDebounceTime && lastShortcutKey === keyName) {
