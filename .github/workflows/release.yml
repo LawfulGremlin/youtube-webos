@@ -16,6 +16,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          # Need full history so we can push the follow-up repo.json
+          # commit to main from this tag checkout.
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v5
@@ -40,3 +44,53 @@ jobs:
           omitDraftDuringUpdate: true
           omitPrereleaseDuringUpdate: true
           artifacts: '*.ipk,*.manifest.json'
+
+      # repo.json update is intentionally inlined here rather than handled
+      # by a separate workflow_run-triggered job. GitHub Actions does not
+      # fire downstream workflow_run events for workflows triggered via
+      # GITHUB_TOKEN (only workflow_dispatch/repository_dispatch are
+      # exceptions to that rule). Since release.yml is launched by
+      # bump-lg.yml and auto-tag-on-sync.yml via GITHUB_TOKEN, a separate
+      # build_repo.yml listening on workflow_run never fires for normal
+      # releases — which silently leaves repo.json stale.
+      - name: Generate repo.json
+        env:
+          REPO_NAME: ${{ github.repository }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: node tools/gen-repo-json.cjs
+
+      - name: Commit and push repo.json to main
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -e
+          git config user.name  'GitHub Actions'
+          git config user.email 'actions@github.com'
+
+          git add repo.json
+          if git diff --staged --quiet; then
+            echo "repo.json unchanged — nothing to push."
+            exit 0
+          fi
+
+          git commit -m "Update repo.json for ${TAG_NAME} release"
+
+          # Push to main with retry-on-race. Tag checkouts are detached,
+          # so HEAD:main pushes the new commit on top of whatever the tag
+          # points at. If main has moved ahead since the build started,
+          # rebase the single repo.json commit onto the new tip and retry.
+          for attempt in 1 2 3; do
+            git fetch origin main
+            if git push origin HEAD:main; then
+              echo "repo.json pushed to main on attempt $attempt."
+              exit 0
+            fi
+            echo "Push attempt $attempt failed — rebasing onto origin/main."
+            git rebase origin/main || {
+              git rebase --abort || true
+              echo "Rebase failed; aborting."
+              exit 1
+            }
+          done
+          echo "Failed to push repo.json after 3 attempts."
+          exit 1

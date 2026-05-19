@@ -30,3 +30,6 @@ repo.json merge=ours
 .github/workflows/sync-upstream.yml merge=ours
 .github/workflows/auto-tag-on-sync.yml merge=ours
 .github/workflows/bump-lg.yml merge=ours
+.github/workflows/build_repo.yml merge=ours
+.github/workflows/release.yml merge=ours
+tools/gen-repo-json.cjs merge=ours

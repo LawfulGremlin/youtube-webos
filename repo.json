@@ -13,16 +13,16 @@
       "iconUri": "https://raw.githubusercontent.com/LawfulGremlin/youtube-webos/main/assets/icon.png",
       "manifest": {
         "id": "youtube.leanback.v4",
-        "version": "7.9.0",
+        "version": "7.9.1",
         "type": "web",
         "title": "YouTube AdFree",
         "appDescription": "YouTube AdFree",
         "iconUri": "https://raw.githubusercontent.com/LawfulGremlin/youtube-webos/main/assets/icon.png",
         "sourceUrl": "https://github.com/LawfulGremlin/youtube-webos",
         "rootRequired": false,
-        "ipkUrl": "https://github.com/LawfulGremlin/youtube-webos/releases/download/7.9.0/youtube.leanback.v4_7.9.0_all.ipk",
+        "ipkUrl": "https://github.com/LawfulGremlin/youtube-webos/releases/download/7.9.1/youtube.leanback.v4_7.9.1_all.ipk",
         "ipkHash": {
-          "sha256": "9da12e4fc7671296268e32fd755179e7cfc172d4669c72f8c1c2615f1b01ebed"
+          "sha256": "3b123e297b6a1f7c9fcf8a0b5491a9380d1fffdc9fdf3f852d08faaf6f75e6c4"
         }
       }
     }
