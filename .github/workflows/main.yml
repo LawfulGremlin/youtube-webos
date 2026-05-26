@@ -3,8 +3,18 @@ name: Build & Test
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - '.github/workflows/**'
+      - 'LICENSE'
+      - 'docs/**'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - '.github/workflows/**'
+      - 'LICENSE'
+      - 'docs/**'
 
 jobs:
   build:
