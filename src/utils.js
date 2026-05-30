@@ -19,6 +19,9 @@ export const REMOTE_KEYS = {
   RED:    { code: 403, key: 'Red' },
   GREEN:  { code: 404, key: 'Green' },
   YELLOW: { code: 405, key: 'Yellow' },
+  // Secondary yellow keycode emitted by some webOS remotes alongside 405.
+  // Used by screensaver-fix.js to send both halves of the keep-alive burst.
+  YELLOW_ALT: { code: 170, key: 'Yellow', charCode: 170 },
   BLUE:   { code: 406, key: 'Blue' },
 
   0: { code: 48, key: '0' },
@@ -50,58 +53,79 @@ function updatePageState() {
     const cl = _body.classList;
     const newWatch = cl.contains(SELECTORS.WATCH_PAGE_CLASS);
     const newShorts = cl.contains(SELECTORS.SHORTS_PAGE_CLASS);
-	const newAccountSelector = cl.contains(SELECTORS.ACCOUNT_SELECTOR);
-	const newSearch = cl.contains(SELECTORS.SEARCH_PAGE_CLASS);
-    
-    if (newWatch === _isWatchPage && 
-        newShorts === _isShortsPage && 
+    const newAccountSelector = cl.contains(SELECTORS.ACCOUNT_SELECTOR);
+    const newSearch = cl.contains(SELECTORS.SEARCH_PAGE_CLASS);
+
+    if (newWatch === _isWatchPage &&
+        newShorts === _isShortsPage &&
         newAccountSelector === _isAccountSelectorPage &&
         newSearch === _isSearchPage) return;
 
     _isWatchPage = newWatch;
     _isShortsPage = newShorts;
     _isAccountSelectorPage = newAccountSelector;
-	_isSearchPage = newSearch;
-    
-    window.dispatchEvent(new CustomEvent('ytaf-page-update', { 
-        detail: { 
-            isWatch: _isWatchPage, 
+    _isSearchPage = newSearch;
+
+    window.dispatchEvent(new CustomEvent('ytaf-page-update', {
+        detail: {
+            isWatch: _isWatchPage,
             isShorts: _isShortsPage,
             isAccountSelector: _isAccountSelectorPage,
-			isSearch: _isSearchPage
-        } 
+            isSearch: _isSearchPage
+        }
     }));
 }
 
 if (typeof document !== 'undefined') {
-	const initObserver = () => {
-		_body = document.body;
-		const pageObserver = new MutationObserver((mutations) => {
-			for (let m of mutations) {
-				if (m.target.className !== m.oldValue) {
-					updatePageState();
-					break;
-				}
-			}
-		});
-		pageObserver.observe(_body, { 
-			attributes: true, 
-			attributeFilter: ['class'],
-			attributeOldValue: true 
-		});
-		updatePageState();
-	};
+    const initObserver = () => {
+        _body = document.body;
+        const pageObserver = new MutationObserver((mutations) => {
+            for (let m of mutations) {
+                // Cheap pre-filter: only care if a WEB_PAGE_TYPE_ class actually changed.
+                // Body classes flip constantly for focus/animation state.
+                const oldV = m.oldValue || '';
+                const newV = m.target.className || '';
+                if (newV === oldV) continue;
+                if (oldV.indexOf('WEB_PAGE_TYPE_') === -1 && newV.indexOf('WEB_PAGE_TYPE_') === -1) continue;
+                updatePageState();
+                break;
+            }
+        });
+        pageObserver.observe(_body, {
+            attributes: true,
+            attributeFilter: ['class'],
+            attributeOldValue: true
+        });
+        updatePageState();
+    };
 
-	if (document.body) {
-		initObserver();
-	} else {
-		document.addEventListener('DOMContentLoaded', initObserver);
-	}
+    if (document.body) {
+        initObserver();
+    } else {
+        document.addEventListener('DOMContentLoaded', initObserver);
+    }
 }
 
 export const isWatchPage = () => _isWatchPage;
 export const isShortsPage = () => _isShortsPage;
 export const isSearchPage = () => _isSearchPage;
+
+// Cached <video> lookup. Several shortcut handlers re-query
+// document.querySelector('video') per keypress; cache it for the lifetime of
+// a watch/shorts session and invalidate when the page state changes.
+let _cachedVideo = null;
+export function getVideo() {
+  if (_cachedVideo && _cachedVideo.isConnected) return _cachedVideo;
+  _cachedVideo = document.querySelector('video');
+  return _cachedVideo;
+}
+if (typeof window !== 'undefined') {
+  window.addEventListener('ytaf-page-update', (e) => {
+    // Drop the cache whenever we leave a video page; the next getVideo() call
+    // will re-query on demand.
+    if (!e.detail.isWatch && !e.detail.isShorts) _cachedVideo = null;
+  });
+}
 
 export function debounce(func, wait) {
   let timeout;
@@ -113,6 +137,10 @@ export function debounce(func, wait) {
 }
 
 let cachedGuestMode = null;
+
+export function invalidateGuestModeCache() {
+  cachedGuestMode = null;
+}
 
 export function isGuestMode() {
   if (cachedGuestMode !== null) return cachedGuestMode;
@@ -241,6 +269,12 @@ export function handleLaunch(params) {
       search.append('launch', 'voice');
       if (voiceContentIntent === 'search') search.append('launch', 'search');
       search.set('vq', intentParam);
+  }
+  
+  if (ytURL.searchParams.get('theme') === 'k') {
+      ytURL.searchParams.delete('env_forceFullAnimation');
+      ytURL.searchParams.delete('env_enableWebSpeech');
+      ytURL.searchParams.delete('env_enableVoice');
   }
 
   window.location.href = ytURL.toString();
