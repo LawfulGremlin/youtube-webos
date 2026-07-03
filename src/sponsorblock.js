@@ -86,6 +86,7 @@ class SponsorBlockHandler {
         this.isTimeListenerActive = false;
         this.boundTimeUpdate = this.handleTimeUpdate.bind(this);
         this.longDistanceTimer = null;
+        this.skipWatchdogTimer = null;
 
         this.lastOverlayHash = null;
 
@@ -258,6 +259,21 @@ class SponsorBlockHandler {
         if (this.longDistanceTimer) {
             clearTimeout(this.longDistanceTimer);
             this.longDistanceTimer = null;
+        }
+    }
+
+    armSkipWatchdog() {
+        this.clearSkipWatchdog();
+        this.skipWatchdogTimer = setTimeout(() => {
+            this.skipWatchdogTimer = null;
+            this.isSkipping = false;
+        }, 1500);
+    }
+
+    clearSkipWatchdog() {
+        if (this.skipWatchdogTimer) {
+            clearTimeout(this.skipWatchdogTimer);
+            this.skipWatchdogTimer = null;
         }
     }
 
@@ -500,6 +516,11 @@ class SponsorBlockHandler {
             this.segments = videoData.segments.sort((a, b) => a.segment[0] - b.segment[0]);
             this.highlightSegment = this.segments.find(s => s.category === 'poi_highlight');
 
+            // start() may have run before the <video> element existed (early
+            // in navigation). Without this retry the handler would draw the
+            // seek-bar overlay but never attach the skip listeners.
+            if (!this.video) this.start();
+
             // Use 'this.video' if start() already found it, or re-query
             const video = this.video || document.querySelector('video');
             if (video && video.duration && !isNaN(video.duration)) {
@@ -566,6 +587,40 @@ class SponsorBlockHandler {
         
         window.addEventListener('yt-player-state-change', this.boundStateChange);
 
+        // Native <video> events as the primary playback-state source. The
+        // yt-player-state-change custom event comes from video-quality.js and
+        // historically only fired when quality forcing was enabled — without
+        // these, the timeupdate listener (the whole skip engine) never
+        // attached if the video was still paused/loading at init.
+        this.addEvent(this.video, 'playing', () => {
+            if (this.isDestroyed) return;
+            this.checkForProgressBar();
+            this.resetSegmentTracking();
+            this.hasPerformedChainSkip = false;
+            this.executeChainSkip(this.video);
+        });
+
+        this.addEvent(this.video, 'pause', () => {
+            if (this.isDestroyed) return;
+            this.stopHighFreqLoop();
+            this.clearLongDistanceTimer();
+            this.toggleTimeListener(false);
+        });
+
+        this.addEvent(this.video, 'ended', () => {
+            if (this.isDestroyed) return;
+            this.hasPerformedChainSkip = false;
+            this.clearLongDistanceTimer();
+            this.toggleTimeListener(false);
+        });
+
+        // The long-distance sleep is computed from the playback rate, so a
+        // rate change while sleeping needs a re-schedule.
+        this.addEvent(this.video, 'ratechange', () => {
+            if (this.isDestroyed || this.video.paused) return;
+            this.resetSegmentTracking();
+        });
+
         // Resize forces an immediate overlay re-sync (bypassing the timeupdate throttle).
         this.boundResize = () => {
             this._lastSyncTime = 0;
@@ -578,6 +633,7 @@ class SponsorBlockHandler {
 
         this.addEvent(this.video, 'seeked', () => {
             if (this.isDestroyed) return;
+            this.clearSkipWatchdog();
             this.stopHighFreqLoop();
             this.hasPerformedChainSkip = false;
             this.executeChainSkip(this.video);
@@ -884,7 +940,10 @@ class SponsorBlockHandler {
         const timeToNext = this.nextSegmentStart - currentTime;
 
         if (timeToNext > 3.0 && !this.currentManualSegment) {
-            const sleepTime = timeToNext - 1.0;
+            // timeToNext is media time; the timeout runs on wall-clock time.
+            // Divide by the playback rate or segments get missed at >1x speed.
+            const rate = this.video.playbackRate > 0 ? this.video.playbackRate : 1;
+            const sleepTime = (timeToNext - 1.0) / rate;
             if (sleepTime > 1.0) {
                 this.toggleTimeListener(false);
                 this.longDistanceTimer = setTimeout(() => {
@@ -1002,7 +1061,12 @@ class SponsorBlockHandler {
         this.isSkipping = true;
         this.lastSkipTime = currentTime;
         this.lastSkippedSegmentIndex = segmentIdx;
-        
+
+        // isSkipping is normally cleared by the 'seeked' handler; if that
+        // event gets lost (element swap, webOS quirk) it would otherwise stay
+        // true forever and block every future skip.
+        this.armSkipWatchdog();
+
         segmentsToMark.forEach(idx => this.skippedSegmentIndices.add(idx));
 
         if (this.isLegacyWebOSVer) {
@@ -1173,7 +1237,8 @@ class SponsorBlockHandler {
 
         this.toggleTimeListener(false);
         this.clearLongDistanceTimer();
-        
+        this.clearSkipWatchdog();
+
         if (this.boundStateChange) {
             window.removeEventListener('yt-player-state-change', this.boundStateChange);
             this.boundStateChange = null;
