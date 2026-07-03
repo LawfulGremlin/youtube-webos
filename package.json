@@ -1,6 +1,6 @@
 {
   "name": "youtube-webos",
-  "version": "8.0.0",
+  "version": "8.0.1",
   "description": "Ad-free YouTube app for webOS",
   "type": "module",
   "main": "index.js",
