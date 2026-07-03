@@ -260,13 +260,17 @@ function interceptAndUpgradeQuality(videoId) {
 }
 
 function handleStateChange(state) {
-  if (isDestroyed || !player || !_shouldForce) return;
-  
+  if (isDestroyed || !player) return;
+
   const actualState = (state && state.data !== undefined) ? state.data : state;
-  
-  window.dispatchEvent(new CustomEvent('yt-player-state-change', { 
+
+  // Always dispatch — SponsorBlock and the watch clock rely on this event
+  // for playback-state sync, independently of quality forcing.
+  window.dispatchEvent(new CustomEvent('yt-player-state-change', {
     detail: { state: actualState, videoId: lastVideoId }
   }));
+
+  if (!_shouldForce) return;
 
   try {
     const videoData = player.getVideoData?.();

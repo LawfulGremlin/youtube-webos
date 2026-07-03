@@ -71,6 +71,10 @@ class SponsorBlockHandler {
         this.activeManualNotification = null;
         this.currentManualSegment = null;
 
+        // Mute segment tracking
+        this.currentMuteSegment = null;
+        this.sbDidMute = false;
+
         // Listeners & Observers
         this.observers = new Set();
         this.listeners = new Map();
@@ -86,6 +90,7 @@ class SponsorBlockHandler {
         this.isTimeListenerActive = false;
         this.boundTimeUpdate = this.handleTimeUpdate.bind(this);
         this.longDistanceTimer = null;
+        this.skipWatchdogTimer = null;
 
         this.lastOverlayHash = null;
 
@@ -223,13 +228,19 @@ class SponsorBlockHandler {
 
             const mode = config[CONFIG_MAPPING[seg.category]];
             if (!mode || mode === 'disable' || mode === 'seek_bar') continue;
-            if (seg.actionType && seg.actionType !== 'skip') continue;
+
+            // Mute segments are muted in place, never seeked over. Only
+            // handle them when the user opted in and the category is on auto.
+            const isMute = seg.actionType === 'mute';
+            if (isMute && (!config.enableMutedSegments || mode !== 'auto_skip')) continue;
+            if (seg.actionType && seg.actionType !== 'skip' && !isMute) continue;
 
             this.skipSegments.push({
                 start: seg.segment[0],
                 end: seg.segment[1],
                 category: seg.category,
                 mode: mode,
+                isMute: isMute,
                 originalIndex: i
             });
         }
@@ -258,6 +269,21 @@ class SponsorBlockHandler {
         if (this.longDistanceTimer) {
             clearTimeout(this.longDistanceTimer);
             this.longDistanceTimer = null;
+        }
+    }
+
+    armSkipWatchdog() {
+        this.clearSkipWatchdog();
+        this.skipWatchdogTimer = setTimeout(() => {
+            this.skipWatchdogTimer = null;
+            this.isSkipping = false;
+        }, 1500);
+    }
+
+    clearSkipWatchdog() {
+        if (this.skipWatchdogTimer) {
+            clearTimeout(this.skipWatchdogTimer);
+            this.skipWatchdogTimer = null;
         }
     }
 
@@ -290,6 +316,20 @@ class SponsorBlockHandler {
         }
 
         this.clearManualNotification();
+
+        // Release the mute only if playback actually left the segment (or it
+        // was removed by a config change) — this method also runs on plain
+        // pause/resume, where unmuting mid-segment would cause an audio blip.
+        if (this.currentMuteSegment) {
+            const t = (this.video && !isNaN(this.video.currentTime)) ? this.video.currentTime : -1;
+            const stillTracked = this.skipSegments.some(
+                s => s.isMute && s.originalIndex === this.currentMuteSegment.originalIndex
+            );
+            if (!stillTracked || t < this.currentMuteSegment.start || t >= this.currentMuteSegment.end) {
+                this.clearMuteState();
+            }
+        }
+
         this.toggleTimeListener(this.nextSegmentStart !== Infinity);
     }
 
@@ -301,24 +341,27 @@ class SponsorBlockHandler {
         this.currentManualSegment = null;
     }
 
-    // O(log N) - Finds segment containing time
+    // Restores audio if (and only if) we muted it for a mute segment. If the
+    // user unmuted themselves mid-segment we just drop our claim.
+    clearMuteState() {
+        if (this.sbDidMute) {
+            if (this.video && this.video.muted) this.video.muted = false;
+            this.sbDidMute = false;
+            window.__sb_pending_unmute = false;
+        }
+        this.currentMuteSegment = null;
+    }
+
+    // Finds the first segment containing time. Segments are sorted by start
+    // but may overlap (e.g. a selfpromo nested inside a sponsor), which
+    // breaks binary search — a linear scan with early exit is correct and
+    // cheap for the segment counts involved.
     findSegmentAtTime(time) {
-        if (this.skipSegments.length === 0) return -1;
-
-        let left = 0;
-        let right = this.skipSegments.length - 1;
-
-        while (left <= right) {
-            const mid = (left + right) >>> 1;
-            const seg = this.skipSegments[mid];
-
-            if (time >= seg.start && time < seg.end) {
-                return mid;
-            } else if (time < seg.start) {
-                right = mid - 1;
-            } else {
-                left = mid + 1;
-            }
+        const len = this.skipSegments.length;
+        for (let i = 0; i < len; i++) {
+            const seg = this.skipSegments[i];
+            if (seg.start > time) break;
+            if (time < seg.end) return i;
         }
         return -1;
     }
@@ -370,11 +413,11 @@ class SponsorBlockHandler {
         let firstSegIdx = -1;
         for (let i = 0; i < segments.length; i++) {
             if (segments[i].start < CHAIN_SKIP_CONSTANTS.START_THRESHOLD) {
-                if (segments[i].mode === 'auto_skip') {
+                if (segments[i].mode === 'auto_skip' && !segments[i].isMute) {
                     firstSegIdx = i;
                     break;
                 } else {
-                    // If the very first segment is a manual skip at 0.0s, we shouldn't chain auto skips
+                    // If the very first segment is a manual skip or mute at 0.0s, we shouldn't chain auto skips
                     return null;
                 }
             } else {
@@ -391,13 +434,17 @@ class SponsorBlockHandler {
         for (let i = firstSegIdx + 1; i < segments.length; i++) {
             const current = segments[i];
 
+            // Mute segments never truncate or extend the chain — a chain that
+            // crosses one skips it, one that ends inside it gets muted there.
+            if (current.isMute) continue;
+
             // If we hit a manual_skip that starts before our chain ends, truncate the chain
             if (current.mode !== 'auto_skip') {
                 if (current.start <= finalSeekTime) {
                     finalSeekTime = Math.min(finalSeekTime, current.start);
                     break;
                 }
-                continue; 
+                continue;
             }
 
             const gapToNext = current.start - finalSeekTime;
@@ -452,7 +499,7 @@ class SponsorBlockHandler {
         
         // Mark all auto_skip segments that were successfully bypassed as skipped
         this.skipSegments.forEach(seg => {
-            if (seg.mode === 'auto_skip' && seg.start < chain.endTime && seg.end <= chain.endTime + 0.1) {
+            if (seg.mode === 'auto_skip' && !seg.isMute && seg.start < chain.endTime && seg.end <= chain.endTime + 0.1) {
                 this.skippedSegmentIndices.add(seg.originalIndex);
             }
         });
@@ -499,6 +546,11 @@ class SponsorBlockHandler {
             // sort in place is fine
             this.segments = videoData.segments.sort((a, b) => a.segment[0] - b.segment[0]);
             this.highlightSegment = this.segments.find(s => s.category === 'poi_highlight');
+
+            // start() may have run before the <video> element existed (early
+            // in navigation). Without this retry the handler would draw the
+            // seek-bar overlay but never attach the skip listeners.
+            if (!this.video) this.start();
 
             // Use 'this.video' if start() already found it, or re-query
             const video = this.video || document.querySelector('video');
@@ -550,6 +602,7 @@ class SponsorBlockHandler {
             if (state === 0) { // ENDED
                 this.hasPerformedChainSkip = false;
                 this.clearLongDistanceTimer();
+                this.clearMuteState();
                 this.toggleTimeListener(false);
             } else if (state === 1) { // PLAYING
                 // Check for progress bar existence on play in case UI was destroyed (e.g. after side-panel interaction)
@@ -566,6 +619,41 @@ class SponsorBlockHandler {
         
         window.addEventListener('yt-player-state-change', this.boundStateChange);
 
+        // Native <video> events as the primary playback-state source. The
+        // yt-player-state-change custom event comes from video-quality.js and
+        // historically only fired when quality forcing was enabled — without
+        // these, the timeupdate listener (the whole skip engine) never
+        // attached if the video was still paused/loading at init.
+        this.addEvent(this.video, 'playing', () => {
+            if (this.isDestroyed) return;
+            this.checkForProgressBar();
+            this.resetSegmentTracking();
+            this.hasPerformedChainSkip = false;
+            this.executeChainSkip(this.video);
+        });
+
+        this.addEvent(this.video, 'pause', () => {
+            if (this.isDestroyed) return;
+            this.stopHighFreqLoop();
+            this.clearLongDistanceTimer();
+            this.toggleTimeListener(false);
+        });
+
+        this.addEvent(this.video, 'ended', () => {
+            if (this.isDestroyed) return;
+            this.hasPerformedChainSkip = false;
+            this.clearLongDistanceTimer();
+            this.clearMuteState();
+            this.toggleTimeListener(false);
+        });
+
+        // The long-distance sleep is computed from the playback rate, so a
+        // rate change while sleeping needs a re-schedule.
+        this.addEvent(this.video, 'ratechange', () => {
+            if (this.isDestroyed || this.video.paused) return;
+            this.resetSegmentTracking();
+        });
+
         // Resize forces an immediate overlay re-sync (bypassing the timeupdate throttle).
         this.boundResize = () => {
             this._lastSyncTime = 0;
@@ -578,6 +666,7 @@ class SponsorBlockHandler {
 
         this.addEvent(this.video, 'seeked', () => {
             if (this.isDestroyed) return;
+            this.clearSkipWatchdog();
             this.stopHighFreqLoop();
             this.hasPerformedChainSkip = false;
             this.executeChainSkip(this.video);
@@ -733,7 +822,7 @@ class SponsorBlockHandler {
         if (!duration || isNaN(duration)) return;
 
         const config = configGetAll();
-        const overlayHash = `${duration}_${this.activeCategories.size}_${this.segments.length}_${config.sbMode_highlight}`;
+        const overlayHash = `${duration}_${this.activeCategories.size}_${this.segments.length}_${config.sbMode_highlight}_${config.enableMutedSegments ? 1 : 0}`;
         if (overlayHash === this.lastOverlayHash && this.overlay && this._isNodeConnected(this.overlay)) {
             return;
         }
@@ -754,6 +843,9 @@ class SponsorBlockHandler {
             } else {
                 const mode = config[CONFIG_MAPPING[segment.category]];
                 if (!mode || mode === 'disable') continue;
+                // Mute segments can't be skipped — drawing them like skip
+                // segments when muting is disabled just looks like a broken skip.
+                if (segment.actionType === 'mute' && !config.enableMutedSegments) continue;
             }
 
             const [start, end] = segment.segment;
@@ -880,11 +972,20 @@ class SponsorBlockHandler {
             }
         }
 
+        if (this.currentMuteSegment) {
+            if (currentTime < this.currentMuteSegment.start || currentTime >= this.currentMuteSegment.end) {
+                this.clearMuteState();
+            }
+        }
+
         // Trust nextSegmentStart to avoid unnecessary searches
         const timeToNext = this.nextSegmentStart - currentTime;
 
-        if (timeToNext > 3.0 && !this.currentManualSegment) {
-            const sleepTime = timeToNext - 1.0;
+        if (timeToNext > 3.0 && !this.currentManualSegment && !this.currentMuteSegment) {
+            // timeToNext is media time; the timeout runs on wall-clock time.
+            // Divide by the playback rate or segments get missed at >1x speed.
+            const rate = this.video.playbackRate > 0 ? this.video.playbackRate : 1;
+            const sleepTime = (timeToNext - 1.0) / rate;
             if (sleepTime > 1.0) {
                 this.toggleTimeListener(false);
                 this.longDistanceTimer = setTimeout(() => {
@@ -895,7 +996,7 @@ class SponsorBlockHandler {
             }
         }
 
-        if (timeToNext > 0 && !this.currentManualSegment) {
+        if (timeToNext > 0 && !this.currentManualSegment && !this.currentMuteSegment) {
             if (timeToNext < 1.0 && !this.pollingRafId) {
                 this.startHighFreqLoop();
             }
@@ -903,14 +1004,14 @@ class SponsorBlockHandler {
             return;
         }
 
-        // Check the predicted segment index first (O(1)) before Binary Search (O(log N))
+        // Check the predicted segment index first (O(1)) before scanning
         let segmentIdx = -1;
         const expectedSeg = this.skipSegments[this.nextSegmentIndex];
 
         if (expectedSeg && currentTime >= expectedSeg.start && currentTime < expectedSeg.end) {
             segmentIdx = this.nextSegmentIndex;
         } else {
-            // Fallback to Binary Search
+            // Fallback to a full lookup
             segmentIdx = this.findSegmentAtTime(currentTime);
         }
 
@@ -934,9 +1035,25 @@ class SponsorBlockHandler {
 
         // We are inside a segment
         const seg = this.skipSegments[segmentIdx];
-        
+
         if (this.tempWhitelistIndex !== -1 && seg.originalIndex !== this.tempWhitelistIndex) {
             this.tempWhitelistIndex = -1;
+        }
+
+        if (seg.isMute) {
+            if (this.currentMuteSegment !== seg) {
+                this.currentMuteSegment = seg;
+                // Mute on entry only — if the user unmutes mid-segment,
+                // respect it and don't fight them.
+                if (!this.video.muted) {
+                    this.video.muted = true;
+                    this.sbDidMute = true;
+                    window.__sb_pending_unmute = true;
+                    const categoryName = this.getCategoryName(seg.category);
+                    showNotification(`Muted ${categoryName.charAt(0).toUpperCase() + categoryName.slice(1)} segment`);
+                }
+            }
+            return;
         }
 
         if (seg.mode === 'manual_skip') {
@@ -982,6 +1099,11 @@ class SponsorBlockHandler {
         for (let i = segmentIdx + 1; i < this.skipSegments.length; i++) {
             const next = this.skipSegments[i];
 
+            // Mute segments are muted in place, never seeked to. A skip that
+            // crosses one just skips it too — truncating the jump at the mute
+            // start would land inside the still-active skip segment and loop.
+            if (next.isMute) continue;
+
             if (next.mode !== 'auto_skip') {
                 if (next.start < jumpTarget) {
                     jumpTarget = next.start;
@@ -1002,7 +1124,12 @@ class SponsorBlockHandler {
         this.isSkipping = true;
         this.lastSkipTime = currentTime;
         this.lastSkippedSegmentIndex = segmentIdx;
-        
+
+        // isSkipping is normally cleared by the 'seeked' handler; if that
+        // event gets lost (element swap, webOS quirk) it would otherwise stay
+        // true forever and block every future skip.
+        this.armSkipWatchdog();
+
         segmentsToMark.forEach(idx => this.skippedSegmentIndices.add(idx));
 
         if (this.isLegacyWebOSVer) {
@@ -1022,7 +1149,7 @@ class SponsorBlockHandler {
         }
 
         this.nextSegmentIndex = segmentIdx + 1;
-        // Re-find next index properly via binary search just to be safe after a skip
+        // Re-find next index properly just to be safe after a skip
         const targetSegIdx = this.findSegmentAtTime(jumpTarget);
         
         if (targetSegIdx !== -1) {
@@ -1173,7 +1300,8 @@ class SponsorBlockHandler {
 
         this.toggleTimeListener(false);
         this.clearLongDistanceTimer();
-        
+        this.clearSkipWatchdog();
+
         if (this.boundStateChange) {
             window.removeEventListener('yt-player-state-change', this.boundStateChange);
             this.boundStateChange = null;
@@ -1196,6 +1324,7 @@ class SponsorBlockHandler {
         this.boundChainSkipRetry = null;
         this.chainSkipVideo = null;
 
+        this.clearMuteState();
         window.__sb_pending_unmute = false;
 
         if (this.abortController) {
