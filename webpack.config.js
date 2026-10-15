@@ -2,15 +2,21 @@ import CopyPlugin from 'copy-webpack-plugin';
 import { TransformAsyncModulesPlugin } from 'transform-async-modules-webpack-plugin';
 import pkgJson from './package.json' with { type: 'json' };
 import TerserPlugin from 'terser-webpack-plugin';
+import { createRequire } from 'module';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const requireCjs = createRequire(import.meta.url);
+const { AssertNoBareRequirePlugin } = requireCjs('./tools/assert-no-bare-require.cjs');
+
 /** @type {(env: Record<string, string>) => (import('webpack').Configuration)[]} */
 const makeConfig = (env) => {
   const isModern = env && env.modern;
+  // Dev-only instrumentation; see src/perf_mon.js. Off unless `--env perf`.
+  const withPerfMon = !!(env && env.perf);
 
   return [
     {
@@ -25,7 +31,11 @@ const makeConfig = (env) => {
       },
       resolve: {
         extensions: ['.mjs', '.cjs', '.js', '.json', '.ts'],
-        alias: isModern ? {
+        alias: {
+          ...(withPerfMon
+            ? {}
+            : { [path.resolve(__dirname, 'src/perf_mon.js')]: false }),
+          ...(isModern ? {
           // Strip global polyfills for modern build
           'core-js-pure': false,
           '@babel/runtime-corejs3': false,
@@ -35,10 +45,15 @@ const makeConfig = (env) => {
           
           // Strip local polyfills
           [path.resolve(__dirname, 'src/spatial-navigation-polyfill.js')]: path.resolve(__dirname, 'src/spatial-navigation.modern.js'),
+          // Chrome 87 has every built-in polyfills.js installs, so the whole
+          // file is dead weight (and a pile of no-op feature checks) here.
+          [path.resolve(__dirname, 'src/polyfills.js')]: false,
           [path.resolve(__dirname, 'src/domrect-polyfill.js')]: false,
-		  [path.resolve(__dirname, 'src/emoji-font.js')]: false,
-		  [path.resolve(__dirname, 'src/emoji-font.css')]: false
-        } : {}
+          [path.resolve(__dirname, 'src/emoji-font.js')]: false,
+		  [path.resolve(__dirname, 'src/hooks/buffer-limit.js')]: false,
+          [path.resolve(__dirname, 'src/emoji-font.css')]: false
+          } : {})
+        }
       },
       module: {
         rules: [
@@ -78,6 +93,10 @@ const makeConfig = (env) => {
             resolve: {
               fullySpecified: false
             }
+          },
+          {
+            test: /\.(png|svg)$/i,
+            type: 'asset/inline'
           },
           {
             test: /\.css$/i,
@@ -124,7 +143,7 @@ const makeConfig = (env) => {
               },
               compress: {
                 drop_console: false,
-                drop_debugger: true,
+                 drop_debugger: true,
                 passes: 4,
                 arrows: isModern,
                 ecma: isModern ? 2020 : 5,
@@ -139,6 +158,9 @@ const makeConfig = (env) => {
         hints: false,
       },
       plugins: [
+        // Catches the "ReferenceError: require is not defined" failure mode at
+        // build time instead of on the TV. See the plugin for the full story.
+        new AssertNoBareRequirePlugin(),
         new CopyPlugin({
           patterns: [
             { context: 'assets', from: '**/*' },
